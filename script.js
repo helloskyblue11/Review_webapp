@@ -1,17 +1,34 @@
-/* 저장소: localStorage */
-const STORAGE_KEY = "magok_reviews_v1";
+// script.js (Firebase + Firestore real-time sync)
 
-/* 유틸 */
+// 0) Firebase SDK imports (CDN). If you didn’t copy CDN imports from console,
+// leave these as-is but replace the version numbers with the ones shown in your console if they differ.
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+import {
+  getFirestore, collection, addDoc, onSnapshot,
+  query, orderBy, deleteDoc, doc, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+import {
+  getAuth, signInAnonymously, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+
+// 1) Your Firebase config (copy from Firebase Console → Web app setup)
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  appId: "YOUR_APP_ID"
+  // (You can include the rest as provided by Firebase)
+};
+
+// 2) Init Firebase services
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+// 3) DOM helpers and existing UI code (unchanged)
 const $ = (sel, el=document) => el.querySelector(sel);
 const $$ = (sel, el=document) => Array.from(el.querySelectorAll(sel));
 
-function loadReviews() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) ?? []; }
-  catch { return []; }
-}
-function saveReviews(list) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-}
 function formatDate(iso) {
   if (!iso) return "-";
   const d = new Date(iso);
@@ -27,11 +44,11 @@ function makeStars(score) {
   return "★".repeat(full) + (half ? "☆" : "") + "·".repeat(empty).replace(/·/g,"☆");
 }
 
-/* 상태 */
-let reviews = loadReviews();
+// App state (now driven by Firestore, not localStorage)
+let reviews = [];
 let selectedRating = null;
 
-/* 요소 참조 */
+// Elements
 const listWrap = $("#listWrap");
 const backdrop = $("#backdrop");
 const openModalBtn = $("#openModalBtn");
@@ -45,7 +62,7 @@ const ratingList = $("#ratingList");
 const searchInput = $("#searchInput");
 const ratingHelper = $("#ratingHelper");
 
-/* 별점 옵션 생성 (0.0 ~ 5.0, 0.5 step) */
+// Build rating options
 (function buildRatingOptions(){
   const values = [];
   for (let v=0; v<=10; v++) values.push(v*0.5);
@@ -68,19 +85,17 @@ const ratingHelper = $("#ratingHelper");
   });
 })();
 
-/* 렌더링 */
+// Render list (no local sort; Firestore query already orders)
 function renderList(filter="") {
   const q = filter.trim().toLowerCase();
-  const data = [...reviews]
-    .sort((a,b)=> b.createdAt - a.createdAt)
-    .filter(r => {
-      if (!q) return true;
-      return (
-        r.name.toLowerCase().includes(q) ||
-        (r.content||"").toLowerCase().includes(q) ||
-        (r.category||"").toLowerCase().includes(q)
-      );
-    });
+  const data = reviews.filter(r => {
+    if (!q) return true;
+    return (
+      r.name.toLowerCase().includes(q) ||
+      (r.content||"").toLowerCase().includes(q) ||
+      (r.category||"").toLowerCase().includes(q)
+    );
+  });
 
   if (data.length === 0) {
     listWrap.innerHTML = `<div class="empty">조건에 맞는 후기가 없습니다.</div>`;
@@ -96,7 +111,7 @@ function renderList(filter="") {
             <button class="button danger" data-action="delete" aria-label="리뷰 삭제">삭제</button>
           </div>
           <div class="meta">
-            <span class="stars">${makeStars(r.rating)} (${r.rating.toFixed(1)})</span>
+            <span class="stars">${makeStars(r.rating)} (${Number(r.rating).toFixed(1)})</span>
             <span class="tag">${r.category||"기타"}</span>
             <span class="helper">방문일 ${formatDate(r.date)}</span>
           </div>
@@ -107,22 +122,24 @@ function renderList(filter="") {
   `;
   listWrap.innerHTML = html;
 
-  /* 삭제 이벤트 바인딩 */
+  // Bind delete
   $$('button[data-action="delete"]', listWrap).forEach(btn=>{
-    btn.addEventListener("click", (e)=>{
+    btn.addEventListener("click", async (e)=>{
       const card = e.currentTarget.closest(".card");
       const id = card?.dataset.id;
       if (!id) return;
       if (confirm("이 후기를 삭제하시겠습니까?")) {
-        reviews = reviews.filter(r => String(r.id) !== String(id));
-        saveReviews(reviews);
-        renderList(searchInput.value);
+        try {
+          await deleteDoc(doc(db, "reviews", id));
+        } catch (err) {
+          alert("삭제 중 오류가 발생했습니다.");
+          console.error(err);
+        }
       }
     });
   });
 }
 
-/* 폼 초기화 */
 function resetForm() {
   nameInput.value = "";
   contentInput.value = "";
@@ -133,7 +150,6 @@ function resetForm() {
   ratingHelper.textContent = "별모양 또는 점수를 눌러 선택";
 }
 
-/* 모달 열기/닫기 */
 function openModal() {
   resetForm();
   backdrop.style.display = "flex";
@@ -143,8 +159,7 @@ function closeModal() {
   backdrop.style.display = "none";
 }
 
-/* 저장 */
-function handleSave() {
+async function handleSave() {
   const name = nameInput.value.trim();
   const rating = selectedRating;
   const category = categorySelect.value;
@@ -159,22 +174,23 @@ function handleSave() {
     return;
   }
 
-  const item = {
-    id: Date.now().toString(),
-    name,
-    rating: Number(rating),
-    category,
-    date,
-    content,
-    createdAt: Date.now()
-  };
-  reviews.push(item);
-  saveReviews(reviews);
-  renderList(searchInput.value);
-  closeModal();
+  try {
+    await addDoc(collection(db, "reviews"), {
+      name,
+      rating: Number(rating),
+      category,
+      date,                // keep as ISO string (simple to format)
+      content,
+      createdAt: serverTimestamp()
+    });
+    closeModal();
+  } catch (err) {
+    alert("등록 중 오류가 발생했습니다.");
+    console.error(err);
+  }
 }
 
-/* 이벤트 */
+// Events
 openModalBtn.addEventListener("click", openModal);
 closeBtn.addEventListener("click", closeModal);
 saveBtn.addEventListener("click", handleSave);
@@ -184,6 +200,24 @@ document.addEventListener("keydown", (e)=> {
 });
 searchInput.addEventListener("input", (e)=> renderList(e.target.value));
 
-/* 초기 진입 */
+// 4) Sign in anonymously, then start real-time listener
+onAuthStateChanged(auth, (user) => {
+  if (!user) {
+    signInAnonymously(auth).catch(err => {
+      console.error("Anonymous sign-in failed", err);
+    });
+    return;
+  }
+
+  // Real-time Firestore subscription ordered by createdAt desc
+  const qRef = query(collection(db, "reviews"), orderBy("createdAt", "desc"));
+  onSnapshot(qRef, (snap) => {
+    reviews = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderList(searchInput.value);
+  }, (err) => {
+    console.error("onSnapshot error:", err);
+  });
+});
+
+// Initial UI
 renderList("");
-openModal();
