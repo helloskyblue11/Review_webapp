@@ -1,16 +1,26 @@
-// ===== Firebase SDK =====
-// Firebase CDN (из html) уже подключен, здесь только config и инициализация
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
+<script type="module">
+  // Import the functions you need from the SDKs you need
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.1.0/firebase-analytics.js";
+  // TODO: Add SDKs for Firebase products that you want to use
+  // https://firebase.google.com/docs/web/setup#available-libraries
 
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
+  // Your web app's Firebase configuration
+  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+  const firebaseConfig = {
+    apiKey: "AIzaSyBt8-UgWtAHHrEvgmQeKSByhgW1aVJ7N_c",
+    authDomain: "magok-reviews.firebaseapp.com",
+    projectId: "magok-reviews",
+    storageBucket: "magok-reviews.firebasestorage.app",
+    messagingSenderId: "809501399916",
+    appId: "1:809501399916:web:08fdf4a9416becdf82b149",
+    measurementId: "G-1D1SSYL93H"
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+  const db = firebase.firestore();
 
 // ===== DOM Elements =====
 const openModalBtn = document.getElementById("openModalBtn");
@@ -175,3 +185,4 @@ function updateList() {
 
   listWrap.appendChild(grid);
 }
+</script>
